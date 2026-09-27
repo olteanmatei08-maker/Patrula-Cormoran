@@ -10,9 +10,9 @@ import { HomePage } from './pages/HomePage';
 import { PedagogyPage } from './pages/PedagogyPage';
 import { CalendarPage } from './pages/CalendarPage';
 import { ResourcesPage } from './pages/ResourcesPage';
+import { ProgressPage } from './pages/ProgressPage';
 import { AboutPage } from './pages/AboutPage';
 import { NotificationPromptModal } from './components/NotificationPromptModal';
-import { AssistantModal } from './components/AssistantModal';
 import {
   registerServiceWorker,
   checkAndDispatchEventNotifications,
@@ -26,7 +26,7 @@ import {
 import { CalendarEvent } from './types';
 
 const EVENTS_CACHE_KEY = 'cormo_patrol_events_cache';
-const VALID_TABS: NavTab[] = ['acasa', 'pedagogie', 'calendar', 'resurse', 'despre'];
+const VALID_TABS: NavTab[] = ['acasa', 'pedagogie', 'calendar', 'resurse', 'progres', 'despre'];
 
 function getInitialTab(): NavTab {
   if (typeof window === 'undefined') return 'calendar';
@@ -37,7 +37,7 @@ function getInitialTab(): NavTab {
     return saved;
   }
 
-  // 2. Check URL hash (e.g. #calendar, #resurse, #despre, #pedagogie)
+  // 2. Check URL hash (e.g. #calendar, #resurse, #despre, #pedagogie, #progres)
   const hash = window.location.hash.replace('#', '').toLowerCase();
   if (VALID_TABS.includes(hash as NavTab)) {
     return hash as NavTab;
@@ -56,108 +56,95 @@ function getInitialTab(): NavTab {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
-  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
   // Handle tab switching with persistent hash, storage, and scroll reset to top
   const handleSelectTab = (tab: NavTab) => {
     setActiveTab(tab);
     localStorage.setItem('cormo_active_tab', tab);
     window.location.hash = tab;
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    if (document.documentElement) document.documentElement.scrollTop = 0;
-    if (document.body) document.body.scrollTop = 0;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Ensure scroll is at the top on every tab switch and on initial mount
-  useEffect(() => {
-    localStorage.setItem('cormo_active_tab', activeTab);
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    if (document.documentElement) document.documentElement.scrollTop = 0;
-    if (document.body) document.body.scrollTop = 0;
-  }, [activeTab]);
-
-  // Keep activeTab in sync with browser navigation (back/forward)
+  // Sync hash changes (e.g. browser back/forward buttons)
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (VALID_TABS.includes(hash as NavTab) && hash !== activeTab) {
-        setActiveTab(hash as NavTab);
-        localStorage.setItem('cormo_active_tab', hash);
+      const h = window.location.hash.replace('#', '').toLowerCase();
+      if (VALID_TABS.includes(h as NavTab)) {
+        setActiveTab(h as NavTab);
       }
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [activeTab]);
+  }, []);
 
-  // Initialize theme, notifications, and 1-second background auto-sync
-  const isSyncingRef = useRef(false);
+  // Set initial theme and subscribe to changes
   useEffect(() => {
     applyThemeToDOM(getAppTheme());
-    const unsubTheme = subscribeToTheme((t) => applyThemeToDOM(t));
+    const unsubscribe = subscribeToTheme((theme) => {
+      applyThemeToDOM(theme);
+    });
+    return unsubscribe;
+  }, []);
 
+  // Register service worker for PWA & push notifications
+  useEffect(() => {
     registerServiceWorker();
+  }, []);
 
-    // Ensure hash matches initial tab if not already present
-    if (!window.location.hash) {
-      window.location.hash = activeTab;
+  // Notification and sync interval ref
+  const syncIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Background calendar sync & notification dispatcher
+  useEffect(() => {
+    // 1. Check cached events immediately on mount
+    try {
+      const raw = localStorage.getItem(EVENTS_CACHE_KEY);
+      if (raw) {
+        const cached: CalendarEvent[] = JSON.parse(raw);
+        if (Array.isArray(cached) && cached.length > 0) {
+          checkAndDispatchEventNotifications(cached);
+        }
+      }
+    } catch (err) {
+      console.warn('Eroare verificare cache inițial notificări:', err);
     }
 
-    const runGlobalSync = async () => {
-      if (isSyncingRef.current) return;
-      isSyncingRef.current = true;
+    // 2. Fetch fresh events and check notifications
+    const performSyncAndNotify = async () => {
       try {
-        const res = await fetchCalendarEventsWithAutoSync();
-        if (res.events && Array.isArray(res.events)) {
-          checkAndDispatchEventNotifications(res.events);
+        const result = await fetchCalendarEventsWithAutoSync();
+        const events = result?.events;
+        if (events && events.length > 0) {
+          localStorage.setItem(EVENTS_CACHE_KEY, JSON.stringify(events));
+          await checkAndDispatchEventNotifications(events);
         }
       } catch (err) {
-        console.warn('Error in background calendar auto-sync:', err);
-      } finally {
-        isSyncingRef.current = false;
+        console.warn('Sincronizare fundal calendar eșuată:', err);
       }
     };
 
-    // Run check on startup
-    runGlobalSync();
+    // Initial check after 3 seconds
+    const initialTimer = setTimeout(() => {
+      performSyncAndNotify();
+    }, 3000);
 
-    // Global background auto-sync every 10 minutes across the entire application
-    const syncInterval = setInterval(runGlobalSync, 10 * 60 * 1000);
+    // Periodic background sync: once every 10 minutes (600,000 ms)
+    syncIntervalRef.current = setInterval(performSyncAndNotify, 10 * 60 * 1000);
 
-    // Also run sync when window regains focus or visibility
-    const handleFocus = () => runGlobalSync();
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', handleFocus);
-
-    // 1. Listen for notification click messages from Service Worker
-    const handleServiceWorkerMessage = (event: MessageEvent) => {
-      if (event.data?.tab === 'calendar' || event.data?.type === 'NAVIGATE_TAB') {
-        setActiveTab('calendar');
-        localStorage.setItem('cormo_active_tab', 'calendar');
+    // Also check when tab becomes visible again
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        performSyncAndNotify();
       }
     };
-
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
-    }
-
-    // 2. Listen for custom window event dispatched on desktop notification clicks
-    const handleCustomNavigate = (e: any) => {
-      if (e.detail === 'calendar') {
-        setActiveTab('calendar');
-        localStorage.setItem('cormo_active_tab', 'calendar');
-      }
-    };
-    window.addEventListener('cormo_navigate_tab', handleCustomNavigate);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
-      unsubTheme();
-      clearInterval(syncInterval);
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
-      window.removeEventListener('cormo_navigate_tab', handleCustomNavigate);
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      clearTimeout(initialTimer);
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
       }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
@@ -172,7 +159,6 @@ export default function App() {
       {/* Top Header */}
       <Header
         onNavigateToCalendar={() => handleSelectTab('calendar')}
-        onOpenAssistant={() => setIsAssistantOpen(true)}
       />
 
       {/* Main Content Area - padded at bottom for the frozen bottom navigation bar */}
@@ -181,6 +167,7 @@ export default function App() {
         {activeTab === 'pedagogie' && <PedagogyPage />}
         {activeTab === 'calendar' && <CalendarPage />}
         {activeTab === 'resurse' && <ResourcesPage />}
+        {activeTab === 'progres' && <ProgressPage />}
         {activeTab === 'despre' && <AboutPage />}
       </main>
 
@@ -192,12 +179,6 @@ export default function App() {
 
       {/* Scout Notification Permission Modal (shown on first open) */}
       <NotificationPromptModal />
-
-      {/* Assistant Modal with device persistence & Gemini chat */}
-      <AssistantModal
-        isOpen={isAssistantOpen}
-        onClose={() => setIsAssistantOpen(false)}
-      />
     </div>
   );
 }

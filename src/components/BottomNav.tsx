@@ -1,7 +1,7 @@
 import React from 'react';
-import { Compass, BookOpen, Calendar, FolderKanban, Users } from 'lucide-react';
+import { Compass, BookOpen, Calendar, FolderKanban, TrendingUp, Users } from 'lucide-react';
 
-export type NavTab = 'acasa' | 'pedagogie' | 'calendar' | 'resurse' | 'despre';
+export type NavTab = 'acasa' | 'pedagogie' | 'calendar' | 'resurse' | 'progres' | 'despre';
 
 interface BottomNavProps {
   activeTab: NavTab;
@@ -34,6 +34,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       icon: FolderKanban,
     },
     {
+      id: 'progres' as const,
+      label: 'Progres',
+      icon: TrendingUp,
+    },
+    {
       id: 'despre' as const,
       label: 'Despre',
       icon: Users,
@@ -48,7 +53,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         borderColor: 'var(--border-subtle)',
       }}
     >
-      <div className="max-w-lg mx-auto px-1 sm:px-4 h-16 flex items-center justify-around">
+      <div className="max-w-xl mx-auto px-1 sm:px-4 h-16 flex items-center justify-around">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -77,7 +82,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               </div>
 
               <span
-                className={`text-[9.5px] sm:text-[11px] tracking-tight sm:tracking-wide mt-1 transition-colors ${
+                className={`text-[9px] sm:text-[11px] tracking-tight sm:tracking-wide mt-1 transition-colors ${
                   isActive ? 'text-white font-bold' : 'text-slate-400 font-medium'
                 }`}
               >
