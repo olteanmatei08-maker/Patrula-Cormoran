@@ -6,10 +6,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { BottomNav, NavTab } from './components/BottomNav';
-import { HomePage } from './pages/HomePage';
 import { PedagogyPage } from './pages/PedagogyPage';
-import { CalendarPage } from './pages/CalendarPage';
 import { ResourcesPage } from './pages/ResourcesPage';
+import { CalendarPage } from './pages/CalendarPage';
 import { ProgressPage } from './pages/ProgressPage';
 import { AboutPage } from './pages/AboutPage';
 import { NotificationPromptModal } from './components/NotificationPromptModal';
@@ -26,7 +25,7 @@ import {
 import { CalendarEvent } from './types';
 
 const EVENTS_CACHE_KEY = 'cormo_patrol_events_cache';
-const VALID_TABS: NavTab[] = ['acasa', 'pedagogie', 'calendar', 'resurse', 'progres', 'despre'];
+const VALID_TABS: NavTab[] = ['pedagogie', 'resurse', 'calendar', 'progres', 'despre'];
 
 function getInitialTab(): NavTab {
   if (typeof window === 'undefined') return 'calendar';
@@ -50,7 +49,7 @@ function getInitialTab(): NavTab {
     return tabParam as NavTab;
   }
 
-  // 4. First time ever opening the app: Default directly to 'calendar'!
+  // 4. Default directly to 'calendar'!
   return 'calendar';
 }
 
@@ -163,10 +162,9 @@ export default function App() {
 
       {/* Main Content Area - padded at bottom for the frozen bottom navigation bar */}
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 pb-24">
-        {activeTab === 'acasa' && <HomePage />}
         {activeTab === 'pedagogie' && <PedagogyPage />}
-        {activeTab === 'calendar' && <CalendarPage />}
         {activeTab === 'resurse' && <ResourcesPage />}
+        {activeTab === 'calendar' && <CalendarPage />}
         {activeTab === 'progres' && <ProgressPage />}
         {activeTab === 'despre' && <AboutPage />}
       </main>

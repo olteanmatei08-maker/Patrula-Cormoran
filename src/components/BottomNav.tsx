@@ -1,7 +1,7 @@
 import React from 'react';
-import { Compass, BookOpen, Calendar, FolderKanban, TrendingUp, Users } from 'lucide-react';
+import { BookOpen, FolderKanban, Calendar, TrendingUp, Users } from 'lucide-react';
 
-export type NavTab = 'acasa' | 'pedagogie' | 'calendar' | 'resurse' | 'progres' | 'despre';
+export type NavTab = 'pedagogie' | 'resurse' | 'calendar' | 'progres' | 'despre';
 
 interface BottomNavProps {
   activeTab: NavTab;
@@ -14,24 +14,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 }) => {
   const tabs = [
     {
-      id: 'acasa' as const,
-      label: 'Acasă',
-      icon: Compass,
-    },
-    {
       id: 'pedagogie' as const,
       label: 'Pedagogie',
       icon: BookOpen,
     },
     {
-      id: 'calendar' as const,
-      label: 'Calendar',
-      icon: Calendar,
-    },
-    {
       id: 'resurse' as const,
       label: 'Resurse',
       icon: FolderKanban,
+    },
+    {
+      id: 'calendar' as const,
+      label: 'Calendar',
+      icon: Calendar,
     },
     {
       id: 'progres' as const,
@@ -82,7 +77,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
               </div>
 
               <span
-                className={`text-[9px] sm:text-[11px] tracking-tight sm:tracking-wide mt-1 transition-colors ${
+                className={`text-[9.5px] sm:text-[11px] tracking-tight sm:tracking-wide mt-1 transition-colors ${
                   isActive ? 'text-white font-bold' : 'text-slate-400 font-medium'
                 }`}
               >
