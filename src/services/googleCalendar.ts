@@ -74,7 +74,9 @@ export function saveCachedCalendarEvents(events: CalendarEvent[]) {
   }
 }
 
-// Seamless auto-sync function (queries the backend server which directly scrapes Google Calendar embed with real-time freshness)
+let lastKnownEventsFingerprint = '';
+
+// Seamless auto-sync function (queries the backend server with 1s freshness)
 // NO Google Login, NO OAuth tokens, NO permission error!
 export async function fetchCalendarEventsWithAutoSync(force: boolean = false): Promise<{
   events: CalendarEvent[];
@@ -83,17 +85,28 @@ export async function fetchCalendarEventsWithAutoSync(force: boolean = false): P
   try {
     const url = `/api/calendar/events?force=${force ? 'true' : 'false'}&_t=${Date.now()}`;
     const res = await fetch(url, {
-      headers: { 'Cache-Control': 'no-cache' },
-      signal: AbortSignal.timeout(6000),
+      headers: { 'Cache-Control': 'no-cache, no-store' },
+      signal: AbortSignal.timeout(4000),
     });
 
     if (res.ok) {
       const data = await res.json();
       if (Array.isArray(data.events)) {
         const cleaned = filterOutDemoEvents(data.events);
-        saveCachedCalendarEvents(cleaned);
-        window.dispatchEvent(new CustomEvent('cormo_events_updated', { detail: cleaned }));
-        return { events: cleaned, updated: true };
+        const currentFingerprint = JSON.stringify(cleaned);
+        const hasChanged = currentFingerprint !== lastKnownEventsFingerprint;
+
+        if (hasChanged || force) {
+          lastKnownEventsFingerprint = currentFingerprint;
+          saveCachedCalendarEvents(cleaned);
+          window.dispatchEvent(
+            new CustomEvent('cormo_events_updated', {
+              detail: { events: cleaned, changed: hasChanged },
+            })
+          );
+        }
+
+        return { events: cleaned, updated: hasChanged };
       }
     }
   } catch (err) {

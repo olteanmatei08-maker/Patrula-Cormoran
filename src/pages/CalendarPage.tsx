@@ -20,6 +20,7 @@ export const CalendarPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [iframeKey, setIframeKey] = useState<number>(Date.now());
+  const lastEventsJsonRef = useRef('');
 
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
@@ -55,11 +56,19 @@ export const CalendarPage: React.FC = () => {
     }
   }, []);
 
-  // Listen to background updates from anywhere in the app
+  // Listen to background updates: when events change in Google Calendar, auto-reload iframe
   useEffect(() => {
     const handleEventsUpdated = (e: any) => {
-      if (Array.isArray(e.detail) && e.detail.length > 0) {
-        setEvents(e.detail);
+      const detail = e.detail;
+      const evList = Array.isArray(detail) ? detail : detail?.events;
+      if (Array.isArray(evList) && evList.length > 0) {
+        setEvents(evList);
+        const json = JSON.stringify(evList);
+        // If events changed (new event added or date updated), auto-reload the Google Calendar iframe!
+        if (lastEventsJsonRef.current && lastEventsJsonRef.current !== json) {
+          setIframeKey(Date.now());
+        }
+        lastEventsJsonRef.current = json;
       }
     };
     window.addEventListener('cormo_events_updated', handleEventsUpdated);
@@ -91,7 +100,7 @@ export const CalendarPage: React.FC = () => {
     refreshEvents(false);
   }, [refreshEvents]);
 
-  // Polling every 1 second (1000ms) for real-time automatic synchronization
+  // Active polling every 1 second (1000ms) for real-time automatic synchronization
   const isPollingRef = useRef(false);
   useEffect(() => {
     if (!isOnline) return;
@@ -124,8 +133,8 @@ export const CalendarPage: React.FC = () => {
     };
   }, [refreshEvents]);
 
-  // Embedded URL in Schedule / Program format (mode=AGENDA)
-  const embedUrl = `https://calendar.google.com/calendar/embed?src=olteanmatei08%40gmail.com&ctz=Europe%2FBucharest&mode=AGENDA&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=1&bgcolor=%230c1017`;
+  // Embedded URL in Schedule / Program format (mode=AGENDA), week starts on Monday (wkst=2), Romanian language (hl=ro)
+  const embedUrl = `https://calendar.google.com/calendar/embed?src=olteanmatei08%40gmail.com&ctz=Europe%2FBucharest&mode=AGENDA&wkst=2&hl=ro&showTitle=0&showNav=1&showDate=1&showPrint=0&showTabs=1&showCalendars=0&showTz=1&bgcolor=%230c1017`;
 
   return (
     <div className="space-y-5 max-w-5xl mx-auto py-2">
@@ -149,7 +158,7 @@ export const CalendarPage: React.FC = () => {
             type="button"
             onClick={() => refreshEvents(true)}
             disabled={loading || !isOnline}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white transition-all cursor-pointer text-xs font-semibold active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-sm"
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white transition-all cursor-pointer text-xs font-semibold active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-sm shrink-0"
             title="Sincronizează acum datele și reîncarcă calendarul"
             aria-label="Sincronizare calendar"
           >
@@ -158,44 +167,46 @@ export const CalendarPage: React.FC = () => {
           </button>
         </div>
 
-        {/* View Switchers: Only 'Cormo Calendar Oficial' and 'Vremea Sâmbătă' */}
+        {/* View Switchers: 'Cormo Calendar Oficial' and 'Vremea Sâmbătă' right next to each other on the same line */}
         <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-800/80">
-          <div className="flex items-center flex-wrap gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 text-xs">
-            {/* 1. Cormo Calendar Oficial */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('calendar')}
-              className={`px-4 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 select-none ${
-                activeTab === 'calendar'
-                  ? 'bg-slate-800 text-white shadow-md border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <CalendarIcon className="w-4 h-4 text-emerald-400" />
-              <span>Cormo Calendar Oficial</span>
-            </button>
+          <div className="flex items-center gap-2 overflow-x-auto py-0.5 max-w-full">
+            <div className="inline-flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 text-xs shrink-0">
+              {/* 1. Cormo Calendar Oficial */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('calendar')}
+                className={`px-3.5 sm:px-4 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap select-none ${
+                  activeTab === 'calendar'
+                    ? 'bg-slate-800 text-white shadow-md border border-slate-700'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <CalendarIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>Cormo Calendar Oficial</span>
+              </button>
 
-            {/* 2. Vremea Sâmbătă */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('meteo')}
-              className={`px-4 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 select-none ${
-                activeTab === 'meteo'
-                  ? 'bg-slate-800 text-white shadow-md border border-slate-700'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <CloudSun className="w-4 h-4 text-amber-400" />
-              <span>Vremea Sâmbătă</span>
-            </button>
+              {/* 2. Vremea Sâmbătă - placed right next to Cormo Calendar Oficial */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('meteo')}
+                className={`px-3.5 sm:px-4 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap select-none ${
+                  activeTab === 'meteo'
+                    ? 'bg-slate-800 text-white shadow-md border border-slate-700'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <CloudSun className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>Vremea Sâmbătă</span>
+              </button>
+            </div>
           </div>
 
           {activeTab === 'calendar' && (
             <a
-              href="https://calendar.google.com/calendar/embed?src=olteanmatei08%40gmail.com&ctz=Europe%2FBucharest&mode=AGENDA"
+              href="https://calendar.google.com/calendar/embed?src=olteanmatei08%40gmail.com&ctz=Europe%2FBucharest&mode=AGENDA&wkst=2&hl=ro"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1.5 font-medium transition-colors px-2 py-1"
+              className="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1.5 font-medium transition-colors px-2 py-1 shrink-0"
               title="Deschide în fereastră separată"
             >
               <span>Deschide extern</span>
@@ -218,7 +229,7 @@ export const CalendarPage: React.FC = () => {
         </div>
       )}
 
-      {/* 1. CORMO CALENDAR OFICIAL (DARK MODE + SCHEDULE / PROGRAM MODE) */}
+      {/* 1. CORMO CALENDAR OFICIAL (DARK MODE + SCHEDULE / PROGRAM MODE + MONDAY FIRST DAY) */}
       {activeTab === 'calendar' && (
         <section className="p-2 sm:p-3 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-2xl overflow-hidden">
           <div className="w-full rounded-2xl overflow-hidden bg-[#121620] relative min-h-[580px] sm:min-h-[680px]">

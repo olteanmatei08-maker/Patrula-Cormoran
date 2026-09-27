@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { BottomNav, NavTab } from './components/BottomNav';
 import { HomePage } from './pages/HomePage';
@@ -16,6 +16,7 @@ import {
   registerServiceWorker,
   checkAndDispatchEventNotifications,
 } from './services/notificationService';
+import { fetchCalendarEventsWithAutoSync } from './services/googleCalendar';
 import {
   getAppTheme,
   applyThemeToDOM,
@@ -27,28 +28,29 @@ const EVENTS_CACHE_KEY = 'cormo_patrol_events_cache';
 const VALID_TABS: NavTab[] = ['acasa', 'pedagogie', 'calendar', 'resurse', 'despre'];
 
 function getInitialTab(): NavTab {
-  if (typeof window === 'undefined') return 'acasa';
+  if (typeof window === 'undefined') return 'calendar';
 
-  // 1. Check URL hash (e.g. #calendar, #resurse, #despre, #pedagogie)
+  // 1. Check if user already navigated and left off on a tab (restore exactly where they were)
+  const saved = localStorage.getItem('cormo_active_tab') as NavTab;
+  if (saved && VALID_TABS.includes(saved)) {
+    return saved;
+  }
+
+  // 2. Check URL hash (e.g. #calendar, #resurse, #despre, #pedagogie)
   const hash = window.location.hash.replace('#', '').toLowerCase();
   if (VALID_TABS.includes(hash as NavTab)) {
     return hash as NavTab;
   }
 
-  // 2. Check query param ?tab=...
+  // 3. Check query param ?tab=...
   const params = new URLSearchParams(window.location.search);
   const tabParam = params.get('tab')?.toLowerCase();
   if (tabParam && VALID_TABS.includes(tabParam as NavTab)) {
     return tabParam as NavTab;
   }
 
-  // 3. Check localStorage
-  const saved = localStorage.getItem('cormo_active_tab') as NavTab;
-  if (saved && VALID_TABS.includes(saved)) {
-    return saved;
-  }
-
-  return 'acasa';
+  // 4. First time ever opening the app: Default directly to 'calendar'!
+  return 'calendar';
 }
 
 export default function App() {
@@ -66,12 +68,27 @@ export default function App() {
 
   // Ensure scroll is at the top on every tab switch and on initial mount
   useEffect(() => {
+    localStorage.setItem('cormo_active_tab', activeTab);
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     if (document.documentElement) document.documentElement.scrollTop = 0;
     if (document.body) document.body.scrollTop = 0;
   }, [activeTab]);
 
-  // Initialize theme, notifications, and navigation listeners
+  // Keep activeTab in sync with browser navigation (back/forward)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (VALID_TABS.includes(hash as NavTab) && hash !== activeTab) {
+        setActiveTab(hash as NavTab);
+        localStorage.setItem('cormo_active_tab', hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [activeTab]);
+
+  // Initialize theme, notifications, and 1-second background auto-sync
+  const isSyncingRef = useRef(false);
   useEffect(() => {
     applyThemeToDOM(getAppTheme());
     const unsubTheme = subscribeToTheme((t) => applyThemeToDOM(t));
@@ -83,28 +100,29 @@ export default function App() {
       window.location.hash = activeTab;
     }
 
-    const runNotificationCheck = () => {
+    const runGlobalSync = async () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
       try {
-        const raw = localStorage.getItem(EVENTS_CACHE_KEY);
-        if (raw) {
-          const events: CalendarEvent[] = JSON.parse(raw);
-          if (Array.isArray(events)) {
-            checkAndDispatchEventNotifications(events);
-          }
+        const res = await fetchCalendarEventsWithAutoSync();
+        if (res.events && Array.isArray(res.events)) {
+          checkAndDispatchEventNotifications(res.events);
         }
       } catch (err) {
-        console.warn('Error running notification check:', err);
+        console.warn('Error in background calendar auto-sync:', err);
+      } finally {
+        isSyncingRef.current = false;
       }
     };
 
     // Run check on startup
-    runNotificationCheck();
+    runGlobalSync();
 
-    // Check periodically every 5 minutes so 24h-before alerts trigger punctually
-    const interval = setInterval(runNotificationCheck, 5 * 60 * 1000);
+    // Global background auto-sync every 1 second (1000ms) across the entire application
+    const syncInterval = setInterval(runGlobalSync, 1000);
 
-    // Also run check when window regains focus
-    const handleFocus = () => runNotificationCheck();
+    // Also run sync when window regains focus or visibility
+    const handleFocus = () => runGlobalSync();
     window.addEventListener('focus', handleFocus);
     document.addEventListener('visibilitychange', handleFocus);
 
@@ -112,6 +130,7 @@ export default function App() {
     const handleServiceWorkerMessage = (event: MessageEvent) => {
       if (event.data?.tab === 'calendar' || event.data?.type === 'NAVIGATE_TAB') {
         setActiveTab('calendar');
+        localStorage.setItem('cormo_active_tab', 'calendar');
       }
     };
 
@@ -123,36 +142,17 @@ export default function App() {
     const handleCustomNavigate = (e: any) => {
       if (e.detail === 'calendar') {
         setActiveTab('calendar');
+        localStorage.setItem('cormo_active_tab', 'calendar');
       }
     };
     window.addEventListener('cormo_navigate_tab', handleCustomNavigate);
 
-    // 3. Check hash or query param for any valid tab
-    const checkHashOrQuery = () => {
-      const hash = window.location.hash.replace('#', '').toLowerCase();
-      if (VALID_TABS.includes(hash as NavTab)) {
-        setActiveTab(hash as NavTab);
-        localStorage.setItem('cormo_active_tab', hash);
-        return;
-      }
-      const params = new URLSearchParams(window.location.search);
-      const tabParam = params.get('tab')?.toLowerCase();
-      if (tabParam && VALID_TABS.includes(tabParam as NavTab)) {
-        setActiveTab(tabParam as NavTab);
-        localStorage.setItem('cormo_active_tab', tabParam);
-      }
-    };
-
-    window.addEventListener('hashchange', checkHashOrQuery);
-    checkHashOrQuery();
-
     return () => {
       unsubTheme();
-      clearInterval(interval);
+      clearInterval(syncInterval);
       window.removeEventListener('focus', handleFocus);
       document.removeEventListener('visibilitychange', handleFocus);
       window.removeEventListener('cormo_navigate_tab', handleCustomNavigate);
-      window.removeEventListener('hashchange', checkHashOrQuery);
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
       }
