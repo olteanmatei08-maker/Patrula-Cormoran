@@ -12,6 +12,7 @@ import { CalendarPage } from './pages/CalendarPage';
 import { ResourcesPage } from './pages/ResourcesPage';
 import { AboutPage } from './pages/AboutPage';
 import { NotificationPromptModal } from './components/NotificationPromptModal';
+import { AssistantModal } from './components/AssistantModal';
 import {
   registerServiceWorker,
   checkAndDispatchEventNotifications,
@@ -55,6 +56,7 @@ function getInitialTab(): NavTab {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
 
   // Handle tab switching with persistent hash, storage, and scroll reset to top
   const handleSelectTab = (tab: NavTab) => {
@@ -170,6 +172,7 @@ export default function App() {
       {/* Top Header */}
       <Header
         onNavigateToCalendar={() => handleSelectTab('calendar')}
+        onOpenAssistant={() => setIsAssistantOpen(true)}
       />
 
       {/* Main Content Area - padded at bottom for the frozen bottom navigation bar */}
@@ -189,6 +192,12 @@ export default function App() {
 
       {/* Scout Notification Permission Modal (shown on first open) */}
       <NotificationPromptModal />
+
+      {/* Assistant Modal with device persistence & Gemini chat */}
+      <AssistantModal
+        isOpen={isAssistantOpen}
+        onClose={() => setIsAssistantOpen(false)}
+      />
     </div>
   );
 }

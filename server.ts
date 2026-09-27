@@ -555,17 +555,64 @@ app.post('/api/resources/sync', (req, res) => {
   }
 });
 
-// Chat endpoint for Patrula Cormoran AI Sfetnic
+// Chat endpoint for Patrula Cormoran Assistant
 app.post('/api/gemini/chat', async (req, res) => {
   try {
-    const { messages, systemInstruction, model } = req.body;
+    const { messages, userSystemInstruction } = req.body;
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: 'GEMINI_API_KEY lipsește din variabilele de mediu.' });
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const selectedModel = model || 'models/gemini-3.8-flash';
+    const selectedModel = 'gemini-3.8-flash';
+
+    // Build real-time calendar context from live events
+    const currentEvents =
+      cachedCalendarEvents.length > 0 ? cachedCalendarEvents : readJsonFile<any[]>(EVENTS_FILE, []);
+    const eventsSummary = currentEvents
+      .map((e: any) => {
+        return `- Titlu: „${e.title}” | Început: ${e.start} | Sfârșit: ${e.end || e.start} | Oră stabilită: ${
+          e.hasTime ? 'Da' : 'Nu (toată ziua)'
+        } | Locație: ${e.location || 'Nestabilită'} | Descriere: ${e.description || '-'}`;
+      })
+      .join('\n');
+
+    const todayStr = new Date().toLocaleDateString('ro-RO', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    const nowTimeStr = new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+
+    const systemInstruction = `Ești un asistent inteligent, prietenos, educat și prompt integrat în aplicația Patrulei Cormoran.
+Vorbește natural ca un asistent personal. NU te da drept "Cormo Asistent", "Cormo" sau alte denumiri asemănătoare; vorbește direct și politicos ca un asistent.
+
+Capabilități și cunoștințe:
+1. Poți răspunde la ORICE întrebare, nu neapărat legată de cercetășie (cultură generală, știință, natură, matematică, logică, istorie, sfaturi practice, etc.). Răspunde complet, clar și structurat în limba română (sau limba în care ești întrebat).
+2. Ai cunoștințe aprofundate despre Cercetașii Munților (Asociația Cercetașii Munților - ACM din România, membră a Uniunii Internaționale a Ghizilor și Cercetașilor din Europa - UIGSE-FSE, site: https://cercetasii-muntilor.ro/):
+   - Ramuri: Lupişori / Pui de Lup (8-12 ani), Cercetaşi / Ghidușe (12-17 ani), Călăuze / Rătăcitori (17+ ani)
+   - Pedagogia catolică a scoutismului european (Baden-Powell, Părintele Jacques Sevin)
+   - Legea cercetașului (10 articole), Promisiunea, Principiile, cele 5 scopuri ale cercetășiei (Sănătatea, Simțul practic, Caracterul, Serviciul, Simțul lui Dumnezeu)
+   - Viața în natură, tehnici de camp, focuri, noduri, orientare, topografie, prim ajutor, semnalizare, pionierat
+   - Sistemul patrulelor (patrula este o echipă autonomă condusă de un Șef de Patrulă, cu roluri specifice: ajutor, trezorier, secretar, infirmier, topograf, intendent etc.)
+   - Patrula Cormoran este o patrulă de cercetași băieți din Cluj-Napoca, având tradiție, strigăt de patrulă și caiet de patrulă.
+3. INFORMAȚII ÎN TIMP REAL DESPRE EVENIMENTE ȘI CALENDAR:
+   - Data și ora curentă: ${todayStr}, ora ${nowTimeStr}.
+   - Evenimente programate în calendarul patrulei:
+${eventsSummary || 'Momentan nu sunt evenimente înregistrate în calendar.'}
+
+Reguli la întrebări legate de calendar și evenimente:
+- Răspunde structurat, concis, direct și natural.
+- Când utilizatorul întreabă despre evenimente (de exemplu „ce evenimente avem?”, „ce activități sunt?”), menționează direct și curat doar numele evenimentelor (de exemplu: „Următoarele evenimente sunt: **Ieșire patrulă**, **Ieșire de trupă**...”). NU genera liste lungi și încărcate cu puncte, sub-puncte, ore și locații repetitive pentru fiecare eveniment decât dacă utilizatorul solicită expres acest nivel de detaliu.
+- Dacă utilizatorul întreabă punctual despre data, ora sau locul unui anumit eveniment, oferă direct acea informație.
+- Dacă utilizatorul întreabă dacă o anumită zi este "liberă", verifică calendarul și spune clar dacă ziua este liberă sau ce eveniment are loc atunci.
+- Păstrează răspunsurile compacte, clare, fără introduceri sau formule de încheiere inutile.
+
+Formatare:
+- Folosește formatare curată (liste cu puncte, text bold pentru date și nume) și un ton cald, politicos, concis și profesionist.
+${userSystemInstruction ? `\nInstrucțiuni adiționale: ${userSystemInstruction}` : ''}`;
 
     const contents = (messages || []).map((m: { role: string; content: string }) => ({
       role: m.role === 'assistant' ? 'model' : 'user',
@@ -574,17 +621,17 @@ app.post('/api/gemini/chat', async (req, res) => {
 
     try {
       const response = await ai.models.generateContent({
-        model: selectedModel,
+        model: 'gemini-3.8-flash',
         contents,
-        config: systemInstruction ? { systemInstruction } : undefined,
+        config: { systemInstruction },
       });
       return res.json({ reply: response.text || '' });
     } catch (primaryErr: any) {
-      console.warn(`Primary model ${selectedModel} failed, trying gemini-2.5-flash fallback:`, primaryErr?.message);
+      console.warn('Primary model gemini-3.8-flash error, trying fallback gemini-flash-latest:', primaryErr?.message);
       const fallbackResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-flash-latest',
         contents,
-        config: systemInstruction ? { systemInstruction } : undefined,
+        config: { systemInstruction },
       });
       return res.json({ reply: fallbackResponse.text || '' });
     }

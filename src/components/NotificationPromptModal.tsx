@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Bell } from 'lucide-react';
+import { Bell, AlertTriangle } from 'lucide-react';
 import {
   isNotificationSupported,
   getNotificationPermission,
@@ -45,7 +45,7 @@ export const NotificationPromptModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-[#0c1017] border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-6 relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-center">
+      <div className="w-full max-w-sm bg-[#0c1017] border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 relative overflow-hidden animate-in fade-in zoom-in-95 duration-200 text-center">
         {/* Subtle decorative glow */}
         <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-32 h-32 bg-emerald-600/10 rounded-full blur-2xl pointer-events-none" />
 
@@ -54,7 +54,7 @@ export const NotificationPromptModal: React.FC = () => {
           <Bell className="w-7 h-7" />
         </div>
 
-        {/* Clear, Minimalist Copy */}
+        {/* Title & Description */}
         <div className="space-y-2">
           <h2 className="text-lg sm:text-xl font-bold text-white font-serif-title tracking-tight">
             Activezi notificările despre evenimente?
@@ -64,7 +64,15 @@ export const NotificationPromptModal: React.FC = () => {
           </p>
         </div>
 
-        {/* Clean, aerisit buttons */}
+        {/* Red Warning Box as requested by user */}
+        <div className="p-3.5 rounded-2xl bg-red-950/40 border border-red-800/70 text-red-300 text-xs text-left leading-relaxed flex items-start gap-2.5">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+          <span>
+            Este posibil ca notificările să nu funcționeze pe anumite dispozitive sau sisteme. Te rugăm să verifici secțiunea <strong className="text-red-200 underline">Calendar</strong> manual pentru a fi la curent cu programul.
+          </span>
+        </div>
+
+        {/* Buttons */}
         <div className="flex flex-col sm:flex-row items-center gap-2.5 pt-1">
           <button
             onClick={handleEnable}
