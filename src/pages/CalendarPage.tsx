@@ -3,7 +3,6 @@ import { CalendarEvent } from '../types';
 import {
   getCachedCalendarEvents,
   fetchCalendarEventsWithAutoSync,
-  GOOGLE_CALENDAR_PUBLIC_URL,
 } from '../services/googleCalendar';
 import {
   Calendar as CalendarIcon,
@@ -18,6 +17,7 @@ import {
   WifiOff,
   Navigation,
   CalendarPlus,
+  CheckCircle2,
 } from 'lucide-react';
 import { WeatherCluj } from '../components/WeatherCluj';
 import { checkAndDispatchEventNotifications } from '../services/notificationService';
@@ -38,44 +38,39 @@ function getEventTimeDisplay(ev: CalendarEvent): string | null {
   }
 
   try {
-    const startDate = new Date(ev.start);
-    if (isNaN(startDate.getTime())) return null;
+    const s = new Date(ev.start);
+    if (isNaN(s.getTime())) return null;
 
-    const startFormatted = startDate.toLocaleTimeString('ro-RO', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const startH = s.getHours();
+    const startM = s.getMinutes();
+    const startTimeStr = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
 
     if (ev.end && ev.end.includes('T')) {
-      const endDate = new Date(ev.end);
-      if (!isNaN(endDate.getTime())) {
-        const endFormatted = endDate.toLocaleTimeString('ro-RO', {
-          hour: '2-digit',
-          minute: '2-digit',
-        });
-        if (startFormatted !== endFormatted) {
-          return `${startFormatted} – ${endFormatted}`;
-        }
+      const e = new Date(ev.end);
+      if (!isNaN(e.getTime())) {
+        const endH = e.getHours();
+        const endM = e.getMinutes();
+        const endTimeStr = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+        return `${startTimeStr} - ${endTimeStr}`;
       }
     }
-
-    return startFormatted;
+    return startTimeStr;
   } catch {
     return null;
   }
 }
 
+// Formatted relative dates (Azi, Mâine, etc.)
 function getRelativeDateLabel(dateStr: string): { label: string; isUrgent: boolean } | null {
-  const target = parseDateSafe(dateStr);
-  if (isNaN(target.getTime())) return null;
+  const d = parseDateSafe(dateStr);
+  if (isNaN(d.getTime())) return null;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTarget = new Date(d.getFullYear(), d.getMonth(), d.getDate());
 
-  const targetDay = new Date(target);
-  targetDay.setHours(0, 0, 0, 0);
-
-  const diffDays = Math.round((targetDay.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  const diffTime = startOfTarget.getTime() - startOfToday.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
 
   if (diffDays === 0) return { label: 'Azi', isUrgent: true };
   if (diffDays === 1) return { label: 'Mâine', isUrgent: true };
@@ -86,7 +81,7 @@ function getRelativeDateLabel(dateStr: string): { label: string; isUrgent: boole
   return null;
 }
 
-// Generate direct URL that opens Google Calendar (or default phone calendar app) with event prefilled
+// Generate direct URL that opens Google Calendar with event prefilled ready to save
 function getAddToCalendarUrl(ev: CalendarEvent): string {
   const title = encodeURIComponent(ev.title || 'Eveniment Patrulă');
   const details = encodeURIComponent(ev.description || '');
@@ -104,9 +99,10 @@ function getAddToCalendarUrl(ev: CalendarEvent): string {
 }
 
 export const CalendarPage: React.FC = () => {
-  // Real patrol events loaded instantaneously from localStorage
+  // Real patrol events loaded instantaneously from cache
   const [events, setEvents] = useState<CalendarEvent[]>(getCachedCalendarEvents);
   const [loading, setLoading] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
 
   const [isOnline, setIsOnline] = useState<boolean>(
     typeof navigator !== 'undefined' ? navigator.onLine : true
@@ -120,16 +116,21 @@ export const CalendarPage: React.FC = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedDay, setSelectedDay] = useState<number>(new Date().getDate());
 
-  // Background fetch function (queries live Google Calendar API & server with force option)
+  // Function to refresh events directly from the public Google Calendar
   const refreshEvents = useCallback(async (interactive: boolean = false) => {
     if (!navigator.onLine) return;
 
     try {
       if (interactive) setLoading(true);
+
       const res = await fetchCalendarEventsWithAutoSync(interactive);
       if (res.events && Array.isArray(res.events)) {
         setEvents(res.events);
         checkAndDispatchEventNotifications(res.events);
+        if (interactive) {
+          setSyncFeedback('Sincronizat live');
+          setTimeout(() => setSyncFeedback(null), 3000);
+        }
       }
     } catch (err) {
       console.warn('Eroare actualizare calendar:', err);
@@ -169,19 +170,34 @@ export const CalendarPage: React.FC = () => {
     };
   }, [refreshEvents]);
 
-  // Initial background refresh on mount
+  // Initial refresh on mount
   useEffect(() => {
     refreshEvents(false);
   }, [refreshEvents]);
 
-  // AUTO-REFRESH EVERY 10 SECONDS (10000ms) for real-time live sync with Google Calendar
+  // Polling every 30 seconds for automatic, real-time sync with Google Calendar
   useEffect(() => {
     if (!isOnline) return;
     const interval = setInterval(() => {
       refreshEvents(false);
-    }, 10000);
+    }, 30 * 1000); // 30 seconds
     return () => clearInterval(interval);
   }, [isOnline, refreshEvents]);
+
+  // Also refresh when tab regains focus or visibility (immediate sync when coming back from Google Calendar)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        refreshEvents(false);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+    };
+  }, [refreshEvents]);
 
   // Filter events into upcoming
   const now = new Date();
@@ -215,36 +231,35 @@ export const CalendarPage: React.FC = () => {
     <div className="space-y-5 max-w-4xl mx-auto py-2">
       {/* Top Header Card */}
       <section className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-2xl space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-center justify-between gap-4">
           <div className="space-y-1">
             <h1 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-wider font-serif-title">
               Calendarul Patrulei
             </h1>
+            {syncFeedback ? (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold animate-in fade-in duration-200">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{syncFeedback}</span>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400 font-medium">
+                Sincronizat automat la fiecare 30 secunde
+              </p>
+            )}
           </div>
 
-          {/* Quick Actions (Open in Google & Manual Refresh) */}
-          <div className="flex items-center gap-2">
-            <a
-              href={GOOGLE_CALENDAR_PUBLIC_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-2 transition-all shadow-sm"
-              title="Deschide calendarul direct în Google Calendar"
-            >
-              <span>Deschide în Google</span>
-              <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-            </a>
-
-            <button
-              onClick={() => refreshEvents(true)}
-              disabled={loading || !isOnline}
-              className="p-2 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 hover:text-white transition-all cursor-pointer text-xs active:scale-95 disabled:opacity-50"
-              title="Actualizează acum evenimentele"
-              aria-label="Actualizează calendar"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-slate-200' : 'text-slate-400'}`} />
-            </button>
-          </div>
+          {/* Refresh / Sincronizare Button */}
+          <button
+            type="button"
+            onClick={() => refreshEvents(true)}
+            disabled={loading || !isOnline}
+            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white transition-all cursor-pointer text-xs font-semibold active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-sm"
+            title="Sincronizează acum cele mai noi evenimente din Google Calendar"
+            aria-label="Sincronizare calendar"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
+            <span>{loading ? 'Se sincronizează...' : 'Sincronizează'}</span>
+          </button>
         </div>
 
         {/* View Switchers Bar */}
@@ -252,6 +267,7 @@ export const CalendarPage: React.FC = () => {
           {/* Calendar vs Vremea Sâmbătă */}
           <div className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
             <button
+              type="button"
               onClick={() => setActiveSubTab('calendar')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 select-none ${
                 activeSubTab === 'calendar'
@@ -264,6 +280,7 @@ export const CalendarPage: React.FC = () => {
             </button>
 
             <button
+              type="button"
               onClick={() => setActiveSubTab('meteo')}
               className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 select-none ${
                 activeSubTab === 'meteo'
@@ -280,6 +297,7 @@ export const CalendarPage: React.FC = () => {
           {activeSubTab === 'calendar' && (
             <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-xl border border-slate-800 text-xs">
               <button
+                type="button"
                 onClick={() => setViewMode('upcoming')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                   viewMode === 'upcoming'
@@ -290,6 +308,7 @@ export const CalendarPage: React.FC = () => {
                 Agendă ({upcomingEvents.length})
               </button>
               <button
+                type="button"
                 onClick={() => setViewMode('month')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors ${
                   viewMode === 'month'
@@ -352,7 +371,7 @@ export const CalendarPage: React.FC = () => {
                         key={ev.id}
                         className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 hover:border-slate-700 shadow-xl space-y-4 transition-all"
                       >
-                        {/* Top row: Date badge, relative label, external links */}
+                        {/* Top row: Date badge, relative label, actions */}
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex items-center gap-3.5">
                             {/* Visual Date Badge */}
@@ -389,7 +408,7 @@ export const CalendarPage: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* Quick Add / Open */}
+                          {/* Action: Add to Personal Calendar & Open Link */}
                           <div className="flex items-center gap-1.5 shrink-0">
                             <a
                               href={getAddToCalendarUrl(ev)}
@@ -431,20 +450,20 @@ export const CalendarPage: React.FC = () => {
                               href={mapsUrl || '#'}
                               target="_blank"
                               rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors group"
-                              title="Deschide pe Google Maps"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-300 hover:text-white hover:border-slate-700 transition-colors"
+                              title="Deschide locația în Google Maps"
                             >
                               <MapPin className="w-3.5 h-3.5 text-red-400 shrink-0" />
-                              <span className="truncate max-w-[220px] sm:max-w-md">{ev.location!.trim()}</span>
-                              <Navigation className="w-3 h-3 text-slate-500 group-hover:text-slate-300 transition-colors ml-0.5 shrink-0" />
+                              <span className="truncate max-w-[200px] sm:max-w-xs">{ev.location}</span>
+                              <Navigation className="w-3 h-3 text-slate-500 ml-0.5" />
                             </a>
                           )}
                         </div>
 
                         {/* Description */}
                         {ev.description && (
-                          <div className="pt-3 border-t border-slate-800/80">
-                            <p className="text-xs text-slate-300 leading-relaxed font-light">
+                          <div className="pt-2 border-t border-slate-800/60">
+                            <p className="text-xs sm:text-sm text-slate-300 whitespace-pre-line leading-relaxed font-light">
                               {ev.description}
                             </p>
                           </div>
@@ -454,119 +473,108 @@ export const CalendarPage: React.FC = () => {
                   })}
                 </div>
               ) : (
-                <div className="p-10 sm:p-14 text-center bg-[#0c1017] rounded-3xl border border-slate-800 space-y-3">
-                  <CalendarDays className="w-12 h-12 text-slate-600 mx-auto" />
-                  <p className="text-white font-bold text-base sm:text-lg">
-                    Nu sunt evenimente viitoare programate
-                  </p>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto leading-relaxed">
-                    Evenimentele nou adăugate în calendar vor apărea automat aici.
+                <div className="text-center py-16 px-4 bg-[#0c1017] rounded-3xl border border-slate-800 space-y-3">
+                  <div className="w-12 h-12 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mx-auto">
+                    <CalendarDays className="w-6 h-6" />
+                  </div>
+                  <h3 className="text-base font-bold text-white">Nu există evenimente programate</h3>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Momentan nu sunt trecute activități în calendar. Când vor fi adăugate, vor apărea automat aici.
                   </p>
                 </div>
               )}
             </section>
           )}
 
-          {/* MONTH VIEW GRID */}
+          {/* MONTH GRID VIEW */}
           {viewMode === 'month' && (
             <section className="space-y-4">
-              <div className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-xl space-y-4">
+              <div className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-xl space-y-5">
                 {/* Month Navigation */}
-                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center justify-between">
                   <h2 className="text-base sm:text-lg font-bold text-white capitalize font-serif-title">
                     {monthName}
                   </h2>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1">
                     <button
+                      type="button"
                       onClick={() => {
                         const prev = new Date(year, month - 1, 1);
                         setCurrentDate(prev);
                         setSelectedDay(1);
                       }}
-                      className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-white border border-slate-800 cursor-pointer transition-colors"
-                      aria-label="Luna precedentă"
+                      className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white cursor-pointer transition-colors"
+                      title="Luna precedentă"
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => {
-                        const now = new Date();
-                        setCurrentDate(now);
-                        setSelectedDay(now.getDate());
-                      }}
-                      className="px-3 py-1 rounded-lg bg-slate-900 text-xs text-slate-300 hover:text-white border border-slate-800 cursor-pointer transition-colors font-medium"
-                    >
-                      Azi
-                    </button>
-                    <button
+                      type="button"
                       onClick={() => {
                         const next = new Date(year, month + 1, 1);
                         setCurrentDate(next);
                         setSelectedDay(1);
                       }}
-                      className="p-1.5 rounded-lg bg-slate-900 text-slate-300 hover:text-white border border-slate-800 cursor-pointer transition-colors"
-                      aria-label="Luna următoare"
+                      className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white cursor-pointer transition-colors"
+                      title="Luna următoare"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
 
-                {/* Weekday Row */}
-                <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider pb-1">
-                  <div>Lu</div>
-                  <div>Ma</div>
-                  <div>Mi</div>
-                  <div>Jo</div>
-                  <div>Vi</div>
-                  <div>Sâ</div>
-                  <div>Du</div>
+                {/* Weekdays header */}
+                <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-bold text-slate-400">
+                  <span>L</span>
+                  <span>M</span>
+                  <span>M</span>
+                  <span>J</span>
+                  <span>V</span>
+                  <span className="text-emerald-400">S</span>
+                  <span className="text-emerald-400">D</span>
                 </div>
 
-                {/* Responsive Day Grid */}
-                <div className="grid grid-cols-7 gap-1 sm:gap-1.5">
+                {/* Days Grid */}
+                <div className="grid grid-cols-7 gap-1.5">
+                  {/* Empty cells before startDay */}
                   {Array.from({ length: startDay }).map((_, i) => (
-                    <div key={`empty-${i}`} className="aspect-square rounded-xl bg-transparent" />
+                    <div key={`empty-${i}`} className="h-10 sm:h-12 rounded-xl bg-slate-900/20" />
                   ))}
 
+                  {/* Day cells */}
                   {Array.from({ length: daysInMonth }).map((_, i) => {
                     const day = i + 1;
-                    const isToday =
-                      new Date().getDate() === day &&
-                      new Date().getMonth() === month &&
-                      new Date().getFullYear() === year;
-                    const isSelected = selectedDay === day;
                     const dayEvents = getEventsForDay(day);
-                    const hasEvents = dayEvents.length > 0;
+                    const isSelected = selectedDay === day;
+                    const isToday =
+                      day === now.getDate() &&
+                      month === now.getMonth() &&
+                      year === now.getFullYear();
 
                     return (
                       <button
-                        key={`day-${day}`}
+                        type="button"
+                        key={day}
                         onClick={() => setSelectedDay(day)}
-                        className={`aspect-square w-full rounded-2xl flex flex-col items-center justify-center relative transition-all cursor-pointer ${
+                        className={`h-10 sm:h-12 rounded-xl text-xs font-semibold relative flex flex-col items-center justify-center transition-all cursor-pointer select-none ${
                           isSelected
-                            ? 'bg-slate-700 text-white font-bold shadow-lg scale-[1.03]'
+                            ? 'bg-emerald-900 border border-emerald-600 text-white shadow-lg'
                             : isToday
-                            ? 'bg-slate-900 border border-slate-600 text-white font-bold'
-                            : hasEvents
-                            ? 'bg-slate-900 text-slate-200 hover:bg-slate-800 border border-slate-800'
-                            : 'bg-slate-950/40 text-slate-400 hover:bg-slate-900/60 border border-slate-900/60'
+                            ? 'bg-slate-800 border border-slate-600 text-white'
+                            : 'bg-slate-900/60 hover:bg-slate-800 text-slate-300 border border-slate-800/80'
                         }`}
                       >
-                        <span className="text-xs sm:text-sm select-none">{day}</span>
-
-                        {hasEvents && (
-                          <div className="flex items-center gap-0.5 mt-0.5">
-                            {isSelected ? (
-                              <span className="w-1.5 h-1.5 rounded-full bg-white" />
-                            ) : (
-                              dayEvents.slice(0, 3).map((_, dotIdx) => (
-                                <span
-                                  key={dotIdx}
-                                  className="w-1.5 h-1.5 rounded-full bg-slate-400"
-                                />
-                              ))
-                            )}
+                        <span>{day}</span>
+                        {dayEvents.length > 0 && (
+                          <div className="flex gap-0.5 mt-0.5">
+                            {dayEvents.slice(0, 3).map((_, eIdx) => (
+                              <span
+                                key={eIdx}
+                                className={`w-1 h-1 rounded-full ${
+                                  isSelected ? 'bg-white' : 'bg-emerald-400'
+                                }`}
+                              />
+                            ))}
                           </div>
                         )}
                       </button>
@@ -575,21 +583,20 @@ export const CalendarPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Selected Day Agenda Card */}
-              <div className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-xl space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                  <span className="text-xs font-semibold text-slate-400 capitalize">
+              {/* Selected Day Agenda */}
+              <div className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-xl space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+                  <h3 className="text-sm sm:text-base font-bold text-white capitalize">
                     {selectedDateFormatted}
-                  </span>
-                  <span className="text-[11px] text-slate-500 font-medium">
-                    {selectedDayEvents.length === 0
-                      ? 'Niciun eveniment'
-                      : `${selectedDayEvents.length} eveniment${selectedDayEvents.length > 1 ? 'e' : ''}`}
+                  </h3>
+                  <span className="text-xs text-slate-400">
+                    {selectedDayEvents.length}{' '}
+                    {selectedDayEvents.length === 1 ? 'eveniment' : 'evenimente'}
                   </span>
                 </div>
 
                 {selectedDayEvents.length > 0 ? (
-                  <div className="space-y-3 pt-1">
+                  <div className="space-y-3">
                     {selectedDayEvents.map((ev) => {
                       const timeDisplay = getEventTimeDisplay(ev);
                       const hasLocation = !!(ev.location && ev.location.trim().length > 0);
@@ -597,7 +604,7 @@ export const CalendarPage: React.FC = () => {
                       return (
                         <div
                           key={ev.id}
-                          className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-2.5"
+                          className="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 space-y-2.5"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <h3 className="text-sm sm:text-base font-bold text-white">
@@ -647,7 +654,7 @@ export const CalendarPage: React.FC = () => {
                           </div>
 
                           {ev.description && (
-                            <p className="text-xs text-slate-400 pt-1 leading-relaxed border-t border-slate-800/80">
+                            <p className="text-xs text-slate-400 whitespace-pre-line pt-1">
                               {ev.description}
                             </p>
                           )}
@@ -656,8 +663,8 @@ export const CalendarPage: React.FC = () => {
                     })}
                   </div>
                 ) : (
-                  <p className="text-xs text-slate-500 py-3 text-center">
-                    Niciun eveniment programat în această zi.
+                  <p className="text-xs text-slate-400 py-4 text-center">
+                    Niciun eveniment programat pentru această zi.
                   </p>
                 )}
               </div>

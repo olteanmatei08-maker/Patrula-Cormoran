@@ -122,6 +122,8 @@ function parseICal(ics: string) {
   return events;
 }
 
+const GOOGLE_CALENDAR_API_KEY = process.env.GOOGLE_CALENDAR_API_KEY || 'AIzaSyAAYnHYz7FZ1INDbjGNdt_Ttt7c4fMEnkw';
+
 let lastCalendarFetchTime = 0;
 let cachedCalendarEvents: any[] = [];
 
@@ -132,134 +134,153 @@ async function fetchLiveGoogleCalendarEvents(calendarId: string, force: boolean 
     return cachedCalendarEvents;
   }
 
-  const agendaUrl = `https://calendar.google.com/calendar/htmlembed?src=${encodeURIComponent(
-    calendarId
-  )}&mode=AGENDA&_t=${now}`;
-
+  // 1. Try Google Calendar REST API v3 with user provided API Key
   try {
-    const res = await fetch(agendaUrl, {
+    const timeMin = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+      calendarId
+    )}/events?key=${GOOGLE_CALENDAR_API_KEY}&singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(
+      timeMin
+    )}&maxResults=100`;
+
+    const apiRes = await fetch(apiUrl, {
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(4000),
+    });
+
+    if (apiRes.ok) {
+      const data = await apiRes.json();
+      if (Array.isArray(data.items)) {
+        const events = data.items.map((item: any) => {
+          const hasTime = !!item.start?.dateTime;
+          const start = item.start?.dateTime || item.start?.date || new Date().toISOString();
+          const end = item.end?.dateTime || item.end?.date || start;
+          return {
+            id: item.id,
+            title: item.summary || 'Eveniment Patrulă',
+            description: item.description || undefined,
+            location: item.location || undefined,
+            start,
+            end,
+            hasTime,
+            category: categorizeEvent(item.summary, item.description),
+            htmlLink: item.htmlLink,
+          };
+        });
+
+        if (events.length > 0) {
+          cachedCalendarEvents = events;
+          lastCalendarFetchTime = now;
+          writeJsonFile(EVENTS_FILE, events);
+          return events;
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn('Google Calendar REST API fetch note:', err?.message);
+  }
+
+  // 2. Fetch live public iCal feed (always works for public calendars, instant and unrestricted)
+  try {
+    const icsUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(
+      calendarId
+    )}/public/basic.ics?_t=${now}`;
+
+    const icsRes = await fetch(icsUrl, {
       headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache, no-store',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PatrulaCormoran/1.0',
       },
       signal: AbortSignal.timeout(5000),
     });
 
-    if (!res.ok) {
-      throw new Error(`Google Calendar agenda HTTP ${res.status}`);
-    }
+    if (icsRes.ok) {
+      const icsText = await icsRes.text();
+      // Unfold multi-line entries per RFC 5545
+      const unfolded = icsText.replace(/\r?\n[ \t]/g, '');
+      const entries = unfolded.split(/BEGIN:VEVENT\r?\n/);
+      const events: any[] = [];
 
-    const html = await res.text();
-    const eventLinkRegex = /href="event\?eid=([^"&]+)[^"]*"/g;
-    const eids: string[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = eventLinkRegex.exec(html)) !== null) {
-      if (!eids.includes(match[1])) {
-        eids.push(match[1]);
-      }
-    }
+      for (let i = 1; i < entries.length; i++) {
+        const block = entries[i].split(/END:VEVENT/)[0];
+        const getField = (name: string) => {
+          const match = block.match(new RegExp(`(?:^|\\r?\\n)${name}(?:;[^:]*)?:(.*)(?:\\r?\\n|$)`));
+          return match
+            ? match[1].trim().replace(/\\\\/g, '\\').replace(/\\,/g, ',').replace(/\\n/g, '\n').replace(/\\;/g, ';')
+            : '';
+        };
 
-    if (eids.length > 0) {
-      const promises = eids.map(async (eid) => {
-        const eventUrl = `https://calendar.google.com/calendar/event?eid=${eid}`;
-        try {
-          const evRes = await fetch(eventUrl, {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept-Language': 'ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7',
-            },
-            signal: AbortSignal.timeout(3000),
-          });
-
-          if (evRes.ok) {
-            const evHtml = await evRes.text();
-            const idMatch = evHtml.match(/content="([a-zA-Z0-9_-]{10,})"/);
-            const nameMatch = evHtml.match(/itemprop="name"[^>]*>([^<]+)<\/span>/);
-            const startMatch = evHtml.match(/itemprop="startDate"\s+datetime="([^"]+)"/);
-            const endMatch = evHtml.match(/itemprop="endDate"\s+datetime="([^"]+)"/);
-            const locMatch = evHtml.match(
-              /itemprop="location"[^>]*>[\s\S]*?<span itemprop="name"[^>]*>([^<]+)<\/span>/
-            );
-            const descMatch = evHtml.match(/itemprop="description"[^>]*>([\s\S]*?)<\/span>/);
-
-            let id = idMatch ? idMatch[1] : null;
-            if (!id) {
-              try {
-                id = Buffer.from(eid.split(' ')[0], 'base64').toString('utf-8').split(' ')[0];
-              } catch {
-                id = eid;
-              }
-            }
-
-            const title = nameMatch ? nameMatch[1].trim() : 'Eveniment';
-            const location = locMatch ? locMatch[1].trim() : undefined;
-            const description = descMatch ? descMatch[1].trim() : undefined;
-
-            const parseGCalTime = (s: string | null) => {
-              if (!s) return '';
-              if (s.includes('T')) {
-                const y = s.slice(0, 4);
-                const m = s.slice(4, 6);
-                const d = s.slice(6, 8);
-                const h = s.slice(9, 11);
-                const min = s.slice(11, 13);
-                const sec = s.slice(13, 15);
-                return new Date(Date.UTC(+y, +m - 1, +d, +h, +min, +sec)).toISOString();
-              } else {
-                const y = s.slice(0, 4);
-                const m = s.slice(4, 6);
-                const d = s.slice(6, 8);
-                return `${y}-${m}-${d}`;
-              }
-            };
-
-            const start = parseGCalTime(startMatch ? startMatch[1] : null);
-            const end = parseGCalTime(endMatch ? endMatch[1] : null);
-
-            return {
-              id,
-              title,
-              location,
-              description,
-              start,
-              end: end || start,
-              hasTime: start.includes('T'),
-              category: 'adunare',
-              htmlLink: `https://www.google.com/calendar/event?eid=${eid}`,
-            };
+        const parseDate = (dStr: string) => {
+          if (!dStr) return { dateStr: '', hasTime: false };
+          const clean = dStr.replace(/[^0-9TZ]/g, '');
+          if (clean.length === 8) {
+            const y = clean.substring(0, 4);
+            const m = clean.substring(4, 6);
+            const d = clean.substring(6, 8);
+            return { dateStr: `${y}-${m}-${d}`, hasTime: false };
           }
-        } catch {
-          // Ignore individual event error
-        }
-        return null;
-      });
+          if (clean.length >= 15) {
+            const y = clean.substring(0, 4);
+            const m = clean.substring(4, 6);
+            const d = clean.substring(6, 8);
+            const h = clean.substring(9, 11);
+            const min = clean.substring(11, 13);
+            const s = clean.substring(13, 15);
+            const isUtc = clean.endsWith('Z');
+            const iso = isUtc
+              ? new Date(Date.UTC(+y, +m - 1, +d, +h, +min, +s)).toISOString()
+              : `${y}-${m}-${d}T${h}:${min}:${s}`;
+            return { dateStr: iso, hasTime: true };
+          }
+          return { dateStr: dStr, hasTime: false };
+        };
 
-      const results = await Promise.allSettled(promises);
-      const fetchedEvents: any[] = [];
-      for (const res of results) {
-        if (res.status === 'fulfilled' && res.value) {
-          fetchedEvents.push(res.value);
+        const rawUid = getField('UID');
+        const id = rawUid.split('@')[0] || rawUid || `ev-${i}`;
+        const summary = getField('SUMMARY') || 'Eveniment Patrulă';
+        const description = getField('DESCRIPTION');
+        const location = getField('LOCATION');
+        const dtstart = getField('DTSTART');
+        const dtend = getField('DTEND') || dtstart;
+
+        const startP = parseDate(dtstart);
+        const endP = parseDate(dtend);
+
+        if (startP.dateStr) {
+          // Generate direct Google Calendar event link from id and calendarId
+          const eid = Buffer.from(`${id} ${calendarId}`).toString('base64');
+          events.push({
+            id,
+            title: summary,
+            description: description || undefined,
+            location: location || undefined,
+            start: startP.dateStr,
+            end: endP.dateStr || startP.dateStr,
+            hasTime: startP.hasTime,
+            category: categorizeEvent(summary, description),
+            htmlLink: `https://www.google.com/calendar/event?eid=${eid}`,
+          });
         }
       }
 
-      if (fetchedEvents.length > 0) {
-        cachedCalendarEvents = fetchedEvents;
+      if (events.length > 0) {
+        cachedCalendarEvents = events;
         lastCalendarFetchTime = now;
-        writeJsonFile(EVENTS_FILE, fetchedEvents);
-        return fetchedEvents;
+        writeJsonFile(EVENTS_FILE, events);
+        return events;
       }
     }
   } catch (err: any) {
-    console.warn('Live calendar sync error:', err?.message);
+    console.warn('Public iCal fetch note:', err?.message);
   }
 
+  // 3. Fallback to persisted cache if network is temporarily unreachable
   const stored = readJsonFile<any[]>(EVENTS_FILE, []);
   if (stored.length > 0) {
     cachedCalendarEvents = stored;
     return stored;
   }
+
   return cachedCalendarEvents;
 }
 
