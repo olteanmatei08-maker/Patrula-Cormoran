@@ -118,8 +118,8 @@ export default function App() {
     // Run check on startup
     runGlobalSync();
 
-    // Global background auto-sync every 1 second (1000ms) across the entire application
-    const syncInterval = setInterval(runGlobalSync, 1000);
+    // Global background auto-sync every 10 minutes across the entire application
+    const syncInterval = setInterval(runGlobalSync, 10 * 60 * 1000);
 
     // Also run sync when window regains focus or visibility
     const handleFocus = () => runGlobalSync();

@@ -393,21 +393,28 @@ export async function checkAndDispatchEventNotifications(
     };
     updatedSnapshots[ev.id] = currentSnapshot;
 
-    // Helper for formatting event notification body
-    const formattedDate = hasValidConfirmedDate ? getEventDateFormatted(ev.start) : null;
+    // Helper for formatting event notification body with LOC and ORA (in loc de data pune loc)
+    const hasLoc = hasLocation && !!locationClean;
+    const hasHour = hasExactTime && !!timeStr;
+
+    const formatLocAndHour = (fallback: string) => {
+      if (hasLoc && hasHour) {
+        return `„${ev.title}” este la ${locationClean} la ora ${timeStr}.`;
+      }
+      if (hasLoc) {
+        return `„${ev.title}” este la ${locationClean}.`;
+      }
+      if (hasHour) {
+        return `„${ev.title}” este la ora ${timeStr}.`;
+      }
+      return `„${ev.title}” ${fallback}.`;
+    };
 
     // Check if event is NEW (added to calendar while app is running)
     if (!isFirstSnapshotRun && !previousSnapshots[ev.id]) {
-      const key = `new_event_${ev.id}_${ev.start}_${timeStr || 'allday'}`;
+      const key = `new_event_${ev.id}_${ev.start}_${timeStr || 'allday'}_${locationClean}`;
       const title = `Patrula Cormoran: „${ev.title}” a fost adăugat în calendar`;
-      let body = `„${ev.title}” a fost adăugat în calendar.`;
-      if (formattedDate && timeStr) {
-        body = `„${ev.title}” este în data de ${formattedDate} la ora ${timeStr}.`;
-      } else if (formattedDate) {
-        body = `„${ev.title}” este în data de ${formattedDate}.`;
-      } else if (timeStr) {
-        body = `„${ev.title}” este la ora ${timeStr}.`;
-      }
+      const body = formatLocAndHour('a fost adăugat în calendar');
 
       const alertItem: NotificationAlert = {
         id: key,
@@ -431,24 +438,21 @@ export async function checkAndDispatchEventNotifications(
       }
     }
 
-    // Check if details were established compared to previous snapshot
+    // Check if location or hour were newly established compared to previous snapshot
     if (!isFirstSnapshotRun && previousSnapshots[ev.id]) {
       const prev = previousSnapshots[ev.id];
 
       // Did location get newly established?
       const locationNewlySet = !prev.hasLocation && hasLocation;
 
-      // Did time get newly established (was all-day or lacked time, now has specific hour)?
+      // Did hour get newly established (was all-day or lacked time, now has specific hour)?
       const timeNewlySet = !prev.hasTime && hasExactTime;
 
-      // Did date get newly established (was placeholder/unconfirmed, now confirmed)?
-      const dateNewlySet = !prev.hasDate && hasValidConfirmedDate;
-
-      if (dateNewlySet && timeNewlySet) {
-        // S-a stabilit data și ora
-        const key = `update_both_${ev.id}_${ev.start}_${timeStr}`;
-        const title = `Patrula Cormoran: „${ev.title}” s-a stabilit data și ora`;
-        const body = `„${ev.title}” s-a stabilit data ${formattedDate || ''} și ora ${timeStr}.`;
+      if (locationNewlySet && timeNewlySet) {
+        // S-a stabilit locul și ora
+        const key = `update_both_${ev.id}_${timeStr}_${locationClean}`;
+        const title = `Patrula Cormoran: „${ev.title}” s-a stabilit locul și ora`;
+        const body = `„${ev.title}” s-a stabilit locul: ${locationClean} și ora: ${timeStr}.`;
 
         const alertItem: NotificationAlert = {
           id: key,
@@ -458,59 +462,7 @@ export async function checkAndDispatchEventNotifications(
           body,
           eventDate: ev.start,
           eventTime: timeStr,
-          location: locationClean || null,
-          timestamp: Date.now(),
-        };
-        currentAlerts.push(alertItem);
-
-        if (notificationsEnabled && !notifiedRecord[key] && permission === 'granted') {
-          const sent = await sendNativeNotification(title, {
-            body,
-            tag: key,
-          });
-          if (sent) markAsNotified(key);
-        }
-      } else if (dateNewlySet) {
-        // S-a stabilit data
-        const key = `update_date_${ev.id}_${ev.start}`;
-        const title = `Patrula Cormoran: „${ev.title}” s-a stabilit data`;
-        const body = `„${ev.title}” s-a stabilit data ${formattedDate || ''}.`;
-
-        const alertItem: NotificationAlert = {
-          id: key,
-          eventId: ev.id,
-          type: 'date_set',
-          title,
-          body,
-          eventDate: ev.start,
-          eventTime: timeStr,
-          location: locationClean || null,
-          timestamp: Date.now(),
-        };
-        currentAlerts.push(alertItem);
-
-        if (notificationsEnabled && !notifiedRecord[key] && permission === 'granted') {
-          const sent = await sendNativeNotification(title, {
-            body,
-            tag: key,
-          });
-          if (sent) markAsNotified(key);
-        }
-      } else if (timeNewlySet) {
-        // S-a stabilit ora
-        const key = `update_time_${ev.id}_${timeStr}`;
-        const title = `Patrula Cormoran: „${ev.title}” s-a stabilit ora`;
-        const body = `„${ev.title}” s-a stabilit ora ${timeStr}.`;
-
-        const alertItem: NotificationAlert = {
-          id: key,
-          eventId: ev.id,
-          type: 'date_set',
-          title,
-          body,
-          eventDate: ev.start,
-          eventTime: timeStr,
-          location: locationClean || null,
+          location: locationClean,
           timestamp: Date.now(),
         };
         currentAlerts.push(alertItem);
@@ -548,23 +500,42 @@ export async function checkAndDispatchEventNotifications(
           });
           if (sent) markAsNotified(key);
         }
+      } else if (timeNewlySet) {
+        // S-a stabilit ora
+        const key = `update_time_${ev.id}_${timeStr}`;
+        const title = `Patrula Cormoran: „${ev.title}” s-a stabilit ora`;
+        const body = `„${ev.title}” s-a stabilit ora: ${timeStr}.`;
+
+        const alertItem: NotificationAlert = {
+          id: key,
+          eventId: ev.id,
+          type: 'date_set',
+          title,
+          body,
+          eventDate: ev.start,
+          eventTime: timeStr,
+          location: locationClean || null,
+          timestamp: Date.now(),
+        };
+        currentAlerts.push(alertItem);
+
+        if (notificationsEnabled && !notifiedRecord[key] && permission === 'granted') {
+          const sent = await sendNativeNotification(title, {
+            body,
+            tag: key,
+          });
+          if (sent) markAsNotified(key);
+        }
       }
     }
 
-    // Standard 7-day and 1-day reminders with exact requested format
+    // Standard 7-day and 1-day reminders with exact requested format (loc și oră)
     const daysUntil = getDaysUntilEvent(ev.start);
     if (daysUntil !== null) {
       if (daysUntil === 7) {
         const key = `${ev.id}_7d`;
         const title = `Patrula Cormoran: „${ev.title}” este peste 7 zile`;
-        let body = `„${ev.title}” este peste 7 zile.`;
-        if (formattedDate && timeStr) {
-          body = `„${ev.title}” este în data de ${formattedDate} la ora ${timeStr}.`;
-        } else if (formattedDate) {
-          body = `„${ev.title}” este în data de ${formattedDate}.`;
-        } else if (timeStr) {
-          body = `„${ev.title}” este la ora ${timeStr}.`;
-        }
+        const body = formatLocAndHour('este peste 7 zile');
 
         const alertItem: NotificationAlert = {
           id: key,
@@ -620,14 +591,7 @@ export async function checkAndDispatchEventNotifications(
       if (daysUntil === 1 || shouldDeliver1dNow) {
         const key = `${ev.id}_1d`;
         const title = `Patrula Cormoran: „${ev.title}” este mâine`;
-        let body = `„${ev.title}” este mâine.`;
-        if (formattedDate && timeStr) {
-          body = `„${ev.title}” este în data de ${formattedDate} la ora ${timeStr}.`;
-        } else if (formattedDate) {
-          body = `„${ev.title}” este în data de ${formattedDate}.`;
-        } else if (timeStr) {
-          body = `„${ev.title}” este la ora ${timeStr}.`;
-        }
+        const body = formatLocAndHour('este mâine');
 
         const alertItem: NotificationAlert = {
           id: key,

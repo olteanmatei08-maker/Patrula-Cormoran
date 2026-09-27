@@ -7,7 +7,6 @@ import {
 import {
   Calendar as CalendarIcon,
   RefreshCw,
-  ExternalLink,
   CloudSun,
   WifiOff,
   CheckCircle2,
@@ -64,7 +63,7 @@ export const CalendarPage: React.FC = () => {
       if (Array.isArray(evList) && evList.length > 0) {
         setEvents(evList);
         const json = JSON.stringify(evList);
-        // If events changed (new event added or date updated), auto-reload the Google Calendar iframe!
+        // If events changed (new event added or details updated), auto-reload the Google Calendar iframe!
         if (lastEventsJsonRef.current && lastEventsJsonRef.current !== json) {
           setIframeKey(Date.now());
         }
@@ -100,7 +99,7 @@ export const CalendarPage: React.FC = () => {
     refreshEvents(false);
   }, [refreshEvents]);
 
-  // Active polling every 1 second (1000ms) for real-time automatic synchronization
+  // Polling every 10 minutes (10 * 60 * 1000ms) for background synchronization
   const isPollingRef = useRef(false);
   useEffect(() => {
     if (!isOnline) return;
@@ -113,7 +112,7 @@ export const CalendarPage: React.FC = () => {
       } finally {
         isPollingRef.current = false;
       }
-    }, 1000); // 1-second auto-sync interval
+    }, 10 * 60 * 1000); // 10-minute auto-sync interval
 
     return () => clearInterval(interval);
   }, [isOnline, refreshEvents]);
@@ -140,79 +139,64 @@ export const CalendarPage: React.FC = () => {
     <div className="space-y-5 max-w-5xl mx-auto py-2">
       {/* Top Header Card */}
       <section className="p-5 sm:p-6 rounded-3xl bg-[#0c1017] border border-slate-800 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-wider font-serif-title">
-              Calendarul Patrulei
-            </h1>
+        {/* Title row */}
+        <div className="space-y-2.5">
+          <h1 className="text-xl sm:text-2xl font-bold text-white uppercase tracking-wider font-serif-title">
+            Calendarul Patrulei
+          </h1>
+
+          {/* Sincronizare Button placed directly UNDER the title */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <button
+              type="button"
+              onClick={() => refreshEvents(true)}
+              disabled={loading || !isOnline}
+              className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white transition-all cursor-pointer text-xs font-semibold active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2 shadow-sm"
+              title="Sincronizează acum datele și reîncarcă calendarul"
+              aria-label="Sincronizare calendar"
+            >
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
+              <span>{loading ? 'Se sincronizează...' : 'Sincronizează'}</span>
+            </button>
+
             {syncFeedback && (
-              <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-semibold animate-in fade-in duration-200">
+              <div className="flex items-center justify-center gap-1.5 text-xs text-emerald-400 font-semibold animate-in fade-in duration-200">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>{syncFeedback}</span>
               </div>
             )}
           </div>
-
-          {/* Refresh / Sincronizare Button */}
-          <button
-            type="button"
-            onClick={() => refreshEvents(true)}
-            disabled={loading || !isOnline}
-            className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-600 text-slate-200 hover:text-white transition-all cursor-pointer text-xs font-semibold active:scale-95 disabled:opacity-50 flex items-center gap-2 shadow-sm shrink-0"
-            title="Sincronizează acum datele și reîncarcă calendarul"
-            aria-label="Sincronizare calendar"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-emerald-400' : 'text-slate-400'}`} />
-            <span>{loading ? 'Se sincronizează...' : 'Sincronizează'}</span>
-          </button>
         </div>
 
-        {/* View Switchers: 'Cormo Calendar Oficial' and 'Vremea Sâmbătă' right next to each other on the same line */}
-        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-3 border-t border-slate-800/80">
-          <div className="flex items-center gap-2 overflow-x-auto py-0.5 max-w-full">
-            <div className="inline-flex items-center gap-1.5 bg-slate-900/90 p-1.5 rounded-2xl border border-slate-800 text-xs shrink-0">
-              {/* 1. Cormo Calendar Oficial */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('calendar')}
-                className={`px-3.5 sm:px-4 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap select-none ${
-                  activeTab === 'calendar'
-                    ? 'bg-slate-800 text-white shadow-md border border-slate-700'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <CalendarIcon className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Cormo Calendar Oficial</span>
-              </button>
+        {/* View Switchers: 'Vremea Sâmbătă' under 'Cormo Calendar Oficial', both full width */}
+        <div className="flex flex-col gap-2.5 w-full pt-3 border-t border-slate-800/80">
+          {/* 1. Cormo Calendar Oficial - Full width */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('calendar')}
+            className={`w-full py-3.5 px-4 rounded-2xl font-bold transition-all cursor-pointer flex items-center justify-center gap-2.5 select-none text-sm ${
+              activeTab === 'calendar'
+                ? 'bg-slate-800 text-white shadow-lg border border-slate-600 ring-1 ring-emerald-500/30'
+                : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 hover:bg-slate-900'
+            }`}
+          >
+            <CalendarIcon className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>Cormo Calendar Oficial</span>
+          </button>
 
-              {/* 2. Vremea Sâmbătă - placed right next to Cormo Calendar Oficial */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('meteo')}
-                className={`px-3.5 sm:px-4 py-2 rounded-xl font-bold transition-all cursor-pointer flex items-center gap-2 whitespace-nowrap select-none ${
-                  activeTab === 'meteo'
-                    ? 'bg-slate-800 text-white shadow-md border border-slate-700'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <CloudSun className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Vremea Sâmbătă</span>
-              </button>
-            </div>
-          </div>
-
-          {activeTab === 'calendar' && (
-            <a
-              href="https://calendar.google.com/calendar/embed?src=olteanmatei08%40gmail.com&ctz=Europe%2FBucharest&mode=AGENDA&wkst=2&hl=ro"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-slate-400 hover:text-emerald-400 flex items-center gap-1.5 font-medium transition-colors px-2 py-1 shrink-0"
-              title="Deschide în fereastră separată"
-            >
-              <span>Deschide extern</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
-          )}
+          {/* 2. Vremea Sâmbătă - placed under Cormo Calendar Oficial, full width */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('meteo')}
+            className={`w-full py-3.5 px-4 rounded-2xl font-bold transition-all cursor-pointer flex items-center justify-center gap-2.5 select-none text-sm ${
+              activeTab === 'meteo'
+                ? 'bg-slate-800 text-white shadow-lg border border-slate-600 ring-1 ring-amber-500/30'
+                : 'bg-slate-900/90 text-slate-400 hover:text-slate-200 border border-slate-800 hover:bg-slate-900'
+            }`}
+          >
+            <CloudSun className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>Vremea Sâmbătă</span>
+          </button>
         </div>
       </section>
 
