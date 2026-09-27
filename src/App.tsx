@@ -1,0 +1,194 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { useState, useEffect } from 'react';
+import { Header } from './components/Header';
+import { BottomNav, NavTab } from './components/BottomNav';
+import { HomePage } from './pages/HomePage';
+import { PedagogyPage } from './pages/PedagogyPage';
+import { CalendarPage } from './pages/CalendarPage';
+import { ResourcesPage } from './pages/ResourcesPage';
+import { AboutPage } from './pages/AboutPage';
+import { NotificationPromptModal } from './components/NotificationPromptModal';
+import {
+  registerServiceWorker,
+  checkAndDispatchEventNotifications,
+} from './services/notificationService';
+import {
+  getAppTheme,
+  applyThemeToDOM,
+  subscribeToTheme,
+} from './services/themeService';
+import { CalendarEvent } from './types';
+
+const EVENTS_CACHE_KEY = 'cormo_patrol_events_cache';
+const VALID_TABS: NavTab[] = ['acasa', 'pedagogie', 'calendar', 'resurse', 'despre'];
+
+function getInitialTab(): NavTab {
+  if (typeof window === 'undefined') return 'acasa';
+
+  // 1. Check URL hash (e.g. #calendar, #resurse, #despre, #pedagogie)
+  const hash = window.location.hash.replace('#', '').toLowerCase();
+  if (VALID_TABS.includes(hash as NavTab)) {
+    return hash as NavTab;
+  }
+
+  // 2. Check query param ?tab=...
+  const params = new URLSearchParams(window.location.search);
+  const tabParam = params.get('tab')?.toLowerCase();
+  if (tabParam && VALID_TABS.includes(tabParam as NavTab)) {
+    return tabParam as NavTab;
+  }
+
+  // 3. Check localStorage
+  const saved = localStorage.getItem('cormo_active_tab') as NavTab;
+  if (saved && VALID_TABS.includes(saved)) {
+    return saved;
+  }
+
+  return 'acasa';
+}
+
+export default function App() {
+  const [activeTab, setActiveTab] = useState<NavTab>(getInitialTab);
+
+  // Handle tab switching with persistent hash, storage, and scroll reset to top
+  const handleSelectTab = (tab: NavTab) => {
+    setActiveTab(tab);
+    localStorage.setItem('cormo_active_tab', tab);
+    window.location.hash = tab;
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+  };
+
+  // Ensure scroll is at the top on every tab switch and on initial mount
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    if (document.documentElement) document.documentElement.scrollTop = 0;
+    if (document.body) document.body.scrollTop = 0;
+  }, [activeTab]);
+
+  // Initialize theme, notifications, and navigation listeners
+  useEffect(() => {
+    applyThemeToDOM(getAppTheme());
+    const unsubTheme = subscribeToTheme((t) => applyThemeToDOM(t));
+
+    registerServiceWorker();
+
+    // Ensure hash matches initial tab if not already present
+    if (!window.location.hash) {
+      window.location.hash = activeTab;
+    }
+
+    const runNotificationCheck = () => {
+      try {
+        const raw = localStorage.getItem(EVENTS_CACHE_KEY);
+        if (raw) {
+          const events: CalendarEvent[] = JSON.parse(raw);
+          if (Array.isArray(events)) {
+            checkAndDispatchEventNotifications(events);
+          }
+        }
+      } catch (err) {
+        console.warn('Error running notification check:', err);
+      }
+    };
+
+    // Run check on startup
+    runNotificationCheck();
+
+    // Check periodically every 5 minutes so 24h-before alerts trigger punctually
+    const interval = setInterval(runNotificationCheck, 5 * 60 * 1000);
+
+    // Also run check when window regains focus
+    const handleFocus = () => runNotificationCheck();
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleFocus);
+
+    // 1. Listen for notification click messages from Service Worker
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.tab === 'calendar' || event.data?.type === 'NAVIGATE_TAB') {
+        setActiveTab('calendar');
+      }
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    }
+
+    // 2. Listen for custom window event dispatched on desktop notification clicks
+    const handleCustomNavigate = (e: any) => {
+      if (e.detail === 'calendar') {
+        setActiveTab('calendar');
+      }
+    };
+    window.addEventListener('cormo_navigate_tab', handleCustomNavigate);
+
+    // 3. Check hash or query param for any valid tab
+    const checkHashOrQuery = () => {
+      const hash = window.location.hash.replace('#', '').toLowerCase();
+      if (VALID_TABS.includes(hash as NavTab)) {
+        setActiveTab(hash as NavTab);
+        localStorage.setItem('cormo_active_tab', hash);
+        return;
+      }
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab')?.toLowerCase();
+      if (tabParam && VALID_TABS.includes(tabParam as NavTab)) {
+        setActiveTab(tabParam as NavTab);
+        localStorage.setItem('cormo_active_tab', tabParam);
+      }
+    };
+
+    window.addEventListener('hashchange', checkHashOrQuery);
+    checkHashOrQuery();
+
+    return () => {
+      unsubTheme();
+      clearInterval(interval);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleFocus);
+      window.removeEventListener('cormo_navigate_tab', handleCustomNavigate);
+      window.removeEventListener('hashchange', checkHashOrQuery);
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+      }
+    };
+  }, []);
+
+  return (
+    <div
+      className="min-h-screen flex flex-col font-sans selection:bg-emerald-500/30 selection:text-white transition-colors duration-200"
+      style={{
+        backgroundColor: 'var(--bg-app)',
+        color: 'var(--text-main)',
+      }}
+    >
+      {/* Top Header */}
+      <Header
+        onNavigateToCalendar={() => handleSelectTab('calendar')}
+      />
+
+      {/* Main Content Area - padded at bottom for the frozen bottom navigation bar */}
+      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-6 pb-24">
+        {activeTab === 'acasa' && <HomePage />}
+        {activeTab === 'pedagogie' && <PedagogyPage />}
+        {activeTab === 'calendar' && <CalendarPage />}
+        {activeTab === 'resurse' && <ResourcesPage />}
+        {activeTab === 'despre' && <AboutPage />}
+      </main>
+
+      {/* Frozen Bottom Navigation Bar */}
+      <BottomNav
+        activeTab={activeTab}
+        setActiveTab={handleSelectTab}
+      />
+
+      {/* Scout Notification Permission Modal (shown on first open) */}
+      <NotificationPromptModal />
+    </div>
+  );
+}
