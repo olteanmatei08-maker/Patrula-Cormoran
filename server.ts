@@ -126,162 +126,174 @@ const GOOGLE_CALENDAR_API_KEY = process.env.GOOGLE_CALENDAR_API_KEY || 'AIzaSyAA
 
 let lastCalendarFetchTime = 0;
 let cachedCalendarEvents: any[] = [];
+let activeFetchPromise: Promise<any[]> | null = null;
 
 async function fetchLiveGoogleCalendarEvents(calendarId: string, force: boolean = false): Promise<any[]> {
   const now = Date.now();
-  // 5-second throttle unless force refresh requested
-  if (!force && cachedCalendarEvents.length > 0 && now - lastCalendarFetchTime < 5000) {
+  // 1-second throttle for real-time polling synchronization
+  if (!force && cachedCalendarEvents.length > 0 && now - lastCalendarFetchTime < 1000) {
     return cachedCalendarEvents;
   }
 
-  // 1. Try Google Calendar REST API v3 with user provided API Key
-  try {
-    const timeMin = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
-      calendarId
-    )}/events?key=${GOOGLE_CALENDAR_API_KEY}&singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(
-      timeMin
-    )}&maxResults=100`;
+  if (activeFetchPromise) {
+    return activeFetchPromise;
+  }
 
-    const apiRes = await fetch(apiUrl, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(4000),
-    });
+  activeFetchPromise = (async () => {
+    try {
+      // 1. Try Google Calendar REST API v3 with user provided API Key
+      try {
+        const timeMin = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const apiUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(
+          calendarId
+        )}/events?key=${GOOGLE_CALENDAR_API_KEY}&singleEvents=true&orderBy=startTime&timeMin=${encodeURIComponent(
+          timeMin
+        )}&maxResults=100`;
 
-    if (apiRes.ok) {
-      const data = await apiRes.json();
-      if (Array.isArray(data.items)) {
-        const events = data.items.map((item: any) => {
-          const hasTime = !!item.start?.dateTime;
-          const start = item.start?.dateTime || item.start?.date || new Date().toISOString();
-          const end = item.end?.dateTime || item.end?.date || start;
-          return {
-            id: item.id,
-            title: item.summary || 'Eveniment Patrulă',
-            description: item.description || undefined,
-            location: item.location || undefined,
-            start,
-            end,
-            hasTime,
-            category: categorizeEvent(item.summary, item.description),
-            htmlLink: item.htmlLink,
-          };
+        const apiRes = await fetch(apiUrl, {
+          headers: { Accept: 'application/json' },
+          signal: AbortSignal.timeout(4000),
         });
 
-        if (events.length > 0) {
-          cachedCalendarEvents = events;
-          lastCalendarFetchTime = now;
-          writeJsonFile(EVENTS_FILE, events);
-          return events;
-        }
-      }
-    }
-  } catch (err: any) {
-    console.warn('Google Calendar REST API fetch note:', err?.message);
-  }
+        if (apiRes.ok) {
+          const data = await apiRes.json();
+          if (Array.isArray(data.items)) {
+            const events = data.items.map((item: any) => {
+              const hasTime = !!item.start?.dateTime;
+              const start = item.start?.dateTime || item.start?.date || new Date().toISOString();
+              const end = item.end?.dateTime || item.end?.date || start;
+              return {
+                id: item.id,
+                title: item.summary || 'Eveniment Patrulă',
+                description: item.description || undefined,
+                location: item.location || undefined,
+                start,
+                end,
+                hasTime,
+                category: categorizeEvent(item.summary, item.description),
+                htmlLink: item.htmlLink,
+              };
+            });
 
-  // 2. Fetch live public iCal feed (always works for public calendars, instant and unrestricted)
-  try {
-    const icsUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(
-      calendarId
-    )}/public/basic.ics?_t=${now}`;
-
-    const icsRes = await fetch(icsUrl, {
-      headers: {
-        'Cache-Control': 'no-cache, no-store',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PatrulaCormoran/1.0',
-      },
-      signal: AbortSignal.timeout(5000),
-    });
-
-    if (icsRes.ok) {
-      const icsText = await icsRes.text();
-      // Unfold multi-line entries per RFC 5545
-      const unfolded = icsText.replace(/\r?\n[ \t]/g, '');
-      const entries = unfolded.split(/BEGIN:VEVENT\r?\n/);
-      const events: any[] = [];
-
-      for (let i = 1; i < entries.length; i++) {
-        const block = entries[i].split(/END:VEVENT/)[0];
-        const getField = (name: string) => {
-          const match = block.match(new RegExp(`(?:^|\\r?\\n)${name}(?:;[^:]*)?:(.*)(?:\\r?\\n|$)`));
-          return match
-            ? match[1].trim().replace(/\\\\/g, '\\').replace(/\\,/g, ',').replace(/\\n/g, '\n').replace(/\\;/g, ';')
-            : '';
-        };
-
-        const parseDate = (dStr: string) => {
-          if (!dStr) return { dateStr: '', hasTime: false };
-          const clean = dStr.replace(/[^0-9TZ]/g, '');
-          if (clean.length === 8) {
-            const y = clean.substring(0, 4);
-            const m = clean.substring(4, 6);
-            const d = clean.substring(6, 8);
-            return { dateStr: `${y}-${m}-${d}`, hasTime: false };
+            if (events.length > 0) {
+              cachedCalendarEvents = events;
+              lastCalendarFetchTime = Date.now();
+              writeJsonFile(EVENTS_FILE, events);
+              return events;
+            }
           }
-          if (clean.length >= 15) {
-            const y = clean.substring(0, 4);
-            const m = clean.substring(4, 6);
-            const d = clean.substring(6, 8);
-            const h = clean.substring(9, 11);
-            const min = clean.substring(11, 13);
-            const s = clean.substring(13, 15);
-            const isUtc = clean.endsWith('Z');
-            const iso = isUtc
-              ? new Date(Date.UTC(+y, +m - 1, +d, +h, +min, +s)).toISOString()
-              : `${y}-${m}-${d}T${h}:${min}:${s}`;
-            return { dateStr: iso, hasTime: true };
-          }
-          return { dateStr: dStr, hasTime: false };
-        };
-
-        const rawUid = getField('UID');
-        const id = rawUid.split('@')[0] || rawUid || `ev-${i}`;
-        const summary = getField('SUMMARY') || 'Eveniment Patrulă';
-        const description = getField('DESCRIPTION');
-        const location = getField('LOCATION');
-        const dtstart = getField('DTSTART');
-        const dtend = getField('DTEND') || dtstart;
-
-        const startP = parseDate(dtstart);
-        const endP = parseDate(dtend);
-
-        if (startP.dateStr) {
-          // Generate direct Google Calendar event link from id and calendarId
-          const eid = Buffer.from(`${id} ${calendarId}`).toString('base64');
-          events.push({
-            id,
-            title: summary,
-            description: description || undefined,
-            location: location || undefined,
-            start: startP.dateStr,
-            end: endP.dateStr || startP.dateStr,
-            hasTime: startP.hasTime,
-            category: categorizeEvent(summary, description),
-            htmlLink: `https://www.google.com/calendar/event?eid=${eid}`,
-          });
         }
+      } catch (err: any) {
+        // Fallback to iCal feed
       }
 
-      if (events.length > 0) {
-        cachedCalendarEvents = events;
-        lastCalendarFetchTime = now;
-        writeJsonFile(EVENTS_FILE, events);
-        return events;
+      // 2. Fetch live public iCal feed (always works for public calendars, instant and unrestricted)
+      try {
+        const icsUrl = `https://calendar.google.com/calendar/ical/${encodeURIComponent(
+          calendarId
+        )}/public/basic.ics?_t=${Date.now()}`;
+
+        const icsRes = await fetch(icsUrl, {
+          headers: {
+            'Cache-Control': 'no-cache, no-store',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) PatrulaCormoran/1.0',
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (icsRes.ok) {
+          const icsText = await icsRes.text();
+          // Unfold multi-line entries per RFC 5545
+          const unfolded = icsText.replace(/\r?\n[ \t]/g, '');
+          const entries = unfolded.split(/BEGIN:VEVENT\r?\n/);
+          const events: any[] = [];
+
+          for (let i = 1; i < entries.length; i++) {
+            const block = entries[i].split(/END:VEVENT/)[0];
+            const getField = (name: string) => {
+              const match = block.match(new RegExp(`(?:^|\\r?\\n)${name}(?:;[^:]*)?:(.*)(?:\\r?\\n|$)`));
+              return match
+                ? match[1].trim().replace(/\\\\/g, '\\').replace(/\\,/g, ',').replace(/\\n/g, '\n').replace(/\\;/g, ';')
+                : '';
+            };
+
+            const parseDate = (dStr: string) => {
+              if (!dStr) return { dateStr: '', hasTime: false };
+              const clean = dStr.replace(/[^0-9TZ]/g, '');
+              if (clean.length === 8) {
+                const y = clean.substring(0, 4);
+                const m = clean.substring(4, 6);
+                const d = clean.substring(6, 8);
+                return { dateStr: `${y}-${m}-${d}`, hasTime: false };
+              }
+              if (clean.length >= 15) {
+                const y = clean.substring(0, 4);
+                const m = clean.substring(4, 6);
+                const d = clean.substring(6, 8);
+                const h = clean.substring(9, 11);
+                const min = clean.substring(11, 13);
+                const s = clean.substring(13, 15);
+                const isUtc = clean.endsWith('Z');
+                const iso = isUtc
+                  ? new Date(Date.UTC(+y, +m - 1, +d, +h, +min, +s)).toISOString()
+                  : `${y}-${m}-${d}T${h}:${min}:${s}`;
+                return { dateStr: iso, hasTime: true };
+              }
+              return { dateStr: dStr, hasTime: false };
+            };
+
+            const rawUid = getField('UID');
+            const id = rawUid.split('@')[0] || rawUid || `ev-${i}`;
+            const summary = getField('SUMMARY') || 'Eveniment Patrulă';
+            const description = getField('DESCRIPTION');
+            const location = getField('LOCATION');
+            const dtstart = getField('DTSTART');
+            const dtend = getField('DTEND') || dtstart;
+
+            const startP = parseDate(dtstart);
+            const endP = parseDate(dtend);
+
+            if (startP.dateStr) {
+              const eid = Buffer.from(`${id} ${calendarId}`).toString('base64');
+              events.push({
+                id,
+                title: summary,
+                description: description || undefined,
+                location: location || undefined,
+                start: startP.dateStr,
+                end: endP.dateStr || startP.dateStr,
+                hasTime: startP.hasTime,
+                category: categorizeEvent(summary, description),
+                htmlLink: `https://www.google.com/calendar/event?eid=${eid}`,
+              });
+            }
+          }
+
+          if (events.length > 0) {
+            cachedCalendarEvents = events;
+            lastCalendarFetchTime = Date.now();
+            writeJsonFile(EVENTS_FILE, events);
+            return events;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Public iCal fetch note:', err?.message);
       }
+
+      // 3. Fallback to persisted cache if network is temporarily unreachable
+      const stored = readJsonFile<any[]>(EVENTS_FILE, []);
+      if (stored.length > 0) {
+        cachedCalendarEvents = stored;
+        return stored;
+      }
+
+      return cachedCalendarEvents;
+    } finally {
+      activeFetchPromise = null;
     }
-  } catch (err: any) {
-    console.warn('Public iCal fetch note:', err?.message);
-  }
+  })();
 
-  // 3. Fallback to persisted cache if network is temporarily unreachable
-  const stored = readJsonFile<any[]>(EVENTS_FILE, []);
-  if (stored.length > 0) {
-    cachedCalendarEvents = stored;
-    return stored;
-  }
-
-  return cachedCalendarEvents;
+  return activeFetchPromise;
 }
 
 // 1. GET CALENDAR EVENTS:
