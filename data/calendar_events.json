@@ -1,14 +1,5 @@
 [
   {
-    "id": "1kjjr8t5vm19f53qsd7llkil7r",
-    "title": "Ieșire de trupă",
-    "start": "2026-10-17",
-    "end": "2026-10-19",
-    "hasTime": false,
-    "category": "adunare",
-    "htmlLink": "https://www.google.com/calendar/event?eid=MWtqanI4dDV2bTE5ZjUzcXNkN2xsa2lsN3Igb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
-  },
-  {
     "id": "1a1u1906q4i4o2kpd4ngiuqmk6",
     "title": "Ședință cu parinții",
     "location": "Cinema Mărăști, Strada Aurel Vlaicu 3A, 400612 Cluj-Napoca, România",
@@ -19,18 +10,28 @@
     "htmlLink": "https://www.google.com/calendar/event?eid=MWExdTE5MDZxNGk0bzJrcGQ0bmdpdXFtazYgb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
   },
   {
-    "id": "462039qug7g76rn547f91aossp",
-    "title": "Ieșire trupă",
-    "start": "2026-12-12",
-    "end": "2026-12-13",
+    "id": "2vn6q622nc432fa0ke00mmqf8p",
+    "title": "Ieșire patrulă",
+    "start": "2026-11-14",
+    "end": "2026-11-15",
     "hasTime": false,
     "category": "adunare",
-    "htmlLink": "https://www.google.com/calendar/event?eid=NDYyMDM5cXVnN2c3NnJuNTQ3ZjkxYW9zc3Agb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
+    "htmlLink": "https://www.google.com/calendar/event?eid=MnZuNnE2MjJuYzQzMmZhMGtlMDBtbXFmOHAgb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
+  },
+  {
+    "id": "1kjjr8t5vm19f53qsd7llkil7r",
+    "title": "Ieșire de trupă",
+    "start": "2026-10-17",
+    "end": "2026-10-19",
+    "hasTime": false,
+    "category": "adunare",
+    "htmlLink": "https://www.google.com/calendar/event?eid=MWtqanI4dDV2bTE5ZjUzcXNkN2xsa2lsN3Igb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
   },
   {
     "id": "2ta55u6tfpgp67esgtjf4rbf65",
     "title": "Deschidere an cercetășesc",
-    "start": "2026-10-03T06:00:00.000Z",
+    "location": "Grupul statuar Școala Ardeleană din Cluj-Napoca, Strada Emmanuel de Martonne 1, 400347 Cluj-Napoca, România",
+    "start": "2026-10-03T04:45:00.000Z",
     "end": "2026-10-03T16:00:00.000Z",
     "hasTime": true,
     "category": "adunare",
@@ -47,12 +48,12 @@
     "htmlLink": "https://www.google.com/calendar/event?eid=MzdrMG82YWJtOG12cXJ1Z2s4aTdlN290cW4gb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
   },
   {
-    "id": "2vn6q622nc432fa0ke00mmqf8p",
-    "title": "Ieșire patrulă",
-    "start": "2026-11-14",
-    "end": "2026-11-15",
+    "id": "462039qug7g76rn547f91aossp",
+    "title": "Ieșire trupă",
+    "start": "2026-12-12",
+    "end": "2026-12-13",
     "hasTime": false,
     "category": "adunare",
-    "htmlLink": "https://www.google.com/calendar/event?eid=MnZuNnE2MjJuYzQzMmZhMGtlMDBtbXFmOHAgb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
+    "htmlLink": "https://www.google.com/calendar/event?eid=NDYyMDM5cXVnN2c3NnJuNTQ3ZjkxYW9zc3Agb2x0ZWFubWF0ZWkwOEBnbWFpbC5jb20="
   }
 ]
